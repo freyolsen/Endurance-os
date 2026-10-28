@@ -1,0 +1,17 @@
+CREATE TABLE users(id TEXT PRIMARY KEY CHECK(id='owner'),access_subject TEXT NOT NULL,created_at INTEGER NOT NULL);
+CREATE TABLE auth_sessions(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL UNIQUE,csrf_hash TEXT NOT NULL,expires_at INTEGER NOT NULL,idle_expires_at INTEGER NOT NULL);
+CREATE INDEX sessions_expiry ON auth_sessions(expires_at);
+CREATE TABLE athlete_profiles(user_id TEXT PRIMARY KEY REFERENCES users(id),data TEXT NOT NULL CHECK(json_valid(data)),version INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE user_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),data TEXT NOT NULL CHECK(json_valid(data)),version INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE training_goals(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),data TEXT NOT NULL CHECK(json_valid(data)),version INTEGER NOT NULL DEFAULT 1,archived_at INTEGER);
+CREATE TABLE training_blocks(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),name TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL CHECK(end_date>=start_date));
+CREATE TABLE workouts(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),calendar_date TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,current_revision INTEGER NOT NULL DEFAULT 1,locked INTEGER NOT NULL DEFAULT 0 CHECK(locked IN (0,1)),deleted_at INTEGER,created_at INTEGER NOT NULL);
+CREATE INDEX workouts_calendar ON workouts(user_id,calendar_date,deleted_at);
+CREATE TABLE workout_revisions(id TEXT PRIMARY KEY,workout_id TEXT NOT NULL REFERENCES workouts(id),revision INTEGER NOT NULL,snapshot_json TEXT NOT NULL CHECK(json_valid(snapshot_json)),created_at INTEGER NOT NULL,UNIQUE(workout_id,revision));
+CREATE TABLE workout_steps(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES workout_revisions(id),parent_step_id TEXT REFERENCES workout_steps(id),position INTEGER NOT NULL,definition_json TEXT NOT NULL CHECK(json_valid(definition_json)));
+CREATE INDEX steps_revision ON workout_steps(revision_id);
+CREATE TABLE workout_templates(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),version INTEGER NOT NULL DEFAULT 1,definition_json TEXT NOT NULL CHECK(json_valid(definition_json)),archived_at INTEGER);
+CREATE TABLE manual_completions(workout_id TEXT PRIMARY KEY REFERENCES workouts(id),planned_revision INTEGER NOT NULL,actual_duration_s INTEGER NOT NULL CHECK(actual_duration_s>0),recorded_at INTEGER NOT NULL,FOREIGN KEY(workout_id,planned_revision) REFERENCES workout_revisions(workout_id,revision));
+CREATE TABLE api_idempotency(key TEXT PRIMARY KEY,request_hash TEXT NOT NULL,response_json TEXT NOT NULL,created_at INTEGER NOT NULL);
+CREATE TABLE mutation_guards(id TEXT PRIMARY KEY,allowed INTEGER NOT NULL CHECK(allowed=1));
+CREATE TABLE rate_limit_buckets(key TEXT PRIMARY KEY,count INTEGER NOT NULL,expires_at INTEGER NOT NULL);

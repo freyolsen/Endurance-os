@@ -1,0 +1,16 @@
+ALTER TABLE athlete_profiles ADD COLUMN max_hr_bpm INTEGER GENERATED ALWAYS AS (json_extract(data,'$.maxHr')) VIRTUAL;
+ALTER TABLE athlete_profiles ADD COLUMN ftp_w INTEGER GENERATED ALWAYS AS (json_extract(data,'$.ftp')) VIRTUAL;
+ALTER TABLE athlete_profiles ADD COLUMN pb_10k_s INTEGER GENERATED ALWAYS AS (json_extract(data,'$.pb10k')) VIRTUAL;
+ALTER TABLE training_goals ADD COLUMN name TEXT GENERATED ALWAYS AS (json_extract(data,'$.name')) VIRTUAL;
+ALTER TABLE training_goals ADD COLUMN sport TEXT GENERATED ALWAYS AS (json_extract(data,'$.sport')) VIRTUAL;
+ALTER TABLE training_goals ADD COLUMN event_date TEXT GENERATED ALWAYS AS (json_extract(data,'$.eventDate')) VIRTUAL;
+ALTER TABLE workout_revisions ADD COLUMN title TEXT GENERATED ALWAYS AS (json_extract(snapshot_json,'$.title')) VIRTUAL;
+ALTER TABLE workout_revisions ADD COLUMN sport TEXT GENERATED ALWAYS AS (json_extract(snapshot_json,'$.sport')) VIRTUAL;
+ALTER TABLE workout_steps ADD COLUMN kind TEXT GENERATED ALWAYS AS (json_extract(definition_json,'$.kind')) VIRTUAL;
+ALTER TABLE workout_steps ADD COLUMN duration_kind TEXT GENERATED ALWAYS AS (json_extract(definition_json,'$.durationKind')) VIRTUAL;
+ALTER TABLE workout_steps ADD COLUMN duration_value REAL GENERATED ALWAYS AS (json_extract(definition_json,'$.value')) VIRTUAL;
+CREATE UNIQUE INDEX steps_root_position ON workout_steps(revision_id,position) WHERE parent_step_id IS NULL;
+CREATE UNIQUE INDEX steps_child_position ON workout_steps(parent_step_id,position) WHERE parent_step_id IS NOT NULL;
+CREATE INDEX goals_date ON training_goals(user_id,event_date,archived_at);
+CREATE TABLE template_versions(id TEXT PRIMARY KEY,template_id TEXT NOT NULL REFERENCES workout_templates(id),version INTEGER NOT NULL,definition_json TEXT NOT NULL CHECK(json_valid(definition_json)),created_at INTEGER NOT NULL,UNIQUE(template_id,version));
+INSERT INTO template_versions SELECT id || ':initial',id,version,definition_json,CAST(unixepoch('subsec')*1000 AS INTEGER) FROM workout_templates;
