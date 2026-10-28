@@ -3,6 +3,7 @@ import { getPlatformProxy } from "wrangler";
 import { readFileSync, readdirSync } from "node:fs";
 import worker, { type Env } from "../worker/index";
 import { newStep } from "../shared/domain";
+import { importPage } from "../worker/integrations/activities";
 let proxy: Awaited<ReturnType<typeof getPlatformProxy>>,
   env: Env,
   cookie = "",
@@ -68,6 +69,23 @@ describe("D1 authenticated API", () => {
     csrf = (await payload(r)).csrf;
   });
   it("rejects CSRF and invalid data", async () => {
+    for (const path of [
+      "/integrations/athledata/connect",
+      "/integrations/athledata/sync",
+      "/workouts/fixture/garmin",
+      "/activities/fixture/link",
+    ])
+      expect(
+        (await call(path, "POST", {}, undefined, { "X-CSRF-Token": "bad" }))
+          .status,
+      ).toBe(403);
+    expect(
+      (
+        await call("/workouts/fixture/garmin", "POST", {
+          action: "x".repeat(262144),
+        })
+      ).status,
+    ).toBe(413);
     expect(
       (
         await call("/workouts", "POST", {}, undefined, {
@@ -237,6 +255,67 @@ describe("D1 authenticated API", () => {
       ).status,
     ).toBe(200);
     expect((await payload(await call("/profile"))).ftp).toBe(240);
+  });
+  it("shows linked imported actuals without double counting manual completion", async () => {
+    const { id } = await payload(
+      await call("/workouts", "POST", {
+        title: "Synthetic imported calendar fixture",
+        sport: "running",
+        description: "",
+        intensity: "easy",
+        calendarDate: "2026-10-28",
+        steps: [newStep()],
+      }),
+    );
+    await call(`/workouts/${id}/complete`, "POST", { actualSeconds: 720 }, 1);
+    await env.DB.prepare(
+      "INSERT INTO integration_connections(id,user_id,status,account_key,updated_at) VALUES('athledata','owner','disconnected','fixture',0)",
+    ).run();
+    const profile = {
+      schemaHash: "0".repeat(64),
+      args: {},
+      itemsPath: "items",
+      originNamespace: "garmin",
+      fields: {
+        externalId: "id",
+        sport: "sport",
+        startAt: "start",
+        elapsedSeconds: "elapsed",
+      },
+    };
+    await importPage(env, "fixture", profile, {
+      items: [
+        {
+          id: "fixture",
+          sport: "running",
+          start: "2026-10-28T08:00:00Z",
+          elapsed: 660,
+        },
+      ],
+    });
+    const activity = await env.DB.prepare(
+      "SELECT id FROM completed_activities WHERE account_key='fixture'",
+    ).first<{ id: string }>();
+    await env.DB.prepare(
+      "INSERT INTO workout_activity_links VALUES(?,?,?,1,'manual',NULL,0,NULL)",
+    )
+      .bind(crypto.randomUUID(), id, activity!.id)
+      .run();
+    const workout = await payload(await call(`/workouts/${id}`));
+    expect(workout).toMatchObject({
+      completedSeconds: 660,
+      manualCompletedSeconds: 720,
+      completionSource: "imported",
+      completedAt: "2026-10-28T08:00:00.000Z",
+    });
+    await env.DB.prepare(
+      "UPDATE completed_activities SET elapsed_s=NULL WHERE id=?",
+    )
+      .bind(activity!.id)
+      .run();
+    expect(
+      (await payload(await call(`/workouts/${id}`))).completedSeconds,
+    ).toBeNull();
   });
   it("expires sessions and fails closed for production identity", async () => {
     const old = env.AUTH_MODE;

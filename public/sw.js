@@ -1,9 +1,27 @@
-const CACHE = "eos-shell-v1";
+const CACHE = "eos-shell-v2";
 self.addEventListener("install", (event) =>
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((c) => c.addAll(["/icon.svg", "/manifest.webmanifest"])),
+    caches.open(CACHE).then(async (c) => {
+      const response = await fetch("/", { cache: "reload" });
+      const html = await response.clone().text();
+      if (
+        !response.ok ||
+        response.redirected ||
+        !html.includes("<title>ENDURANCE OS</title>")
+      )
+        throw new Error("App shell unavailable");
+      const assets = [
+        ...html.matchAll(/(?:src|href)="(\/assets\/[^"?#]+)"/g),
+      ].map((m) => m[1]);
+      await c.addAll([
+        ...assets,
+        "/icon.svg",
+        "/manifest.webmanifest",
+        "/icon-192.png",
+        "/icon-512.png",
+      ]);
+      await c.put("/", response);
+    }),
   ),
 );
 self.addEventListener("activate", (event) =>
@@ -33,7 +51,8 @@ self.addEventListener("fetch", (event) => {
           if (
             r.ok &&
             !r.redirected &&
-            r.headers.get("content-type")?.includes("text/html")
+            r.headers.get("content-type")?.includes("text/html") &&
+            (await r.clone().text()).includes("<title>ENDURANCE OS</title>")
           )
             (await caches.open(CACHE)).put("/", r.clone());
           return r;

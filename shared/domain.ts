@@ -148,6 +148,9 @@ export type Workout = Definition & {
   locked: boolean;
   completedSeconds: number | null;
   completedAt: string | null;
+  completionSource?: "imported" | "manual" | null;
+  manualCompletedSeconds?: number | null;
+  garminRevision?: number | null;
 };
 export const profileSchema = z
   .object({

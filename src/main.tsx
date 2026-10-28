@@ -31,6 +31,11 @@ import {
 } from "lucide-react";
 const WeeklyChart = lazy(() => import("./components/weekly-chart"));
 import { Button } from "./components/ui/button";
+import {
+  IntegrationPanel,
+  GarminActions,
+  ImportedActivities,
+} from "./components/integrations";
 import { api, setCsrf } from "./lib/api";
 import {
   sports,
@@ -407,8 +412,17 @@ function Card({ w, onClick }: { w: Workout; onClick: () => void }) {
         {intensity[w.intensity]}
       </span>
       <span className={w.completedAt ? "completed" : "muted"}>
-        {w.completedAt ? "✓ Gjennomført manuelt" : "Planlagt"} · Ikke
-        synkronisert
+        {w.completedAt
+          ? w.completionSource === "imported"
+            ? "✓ Importert aktivitet"
+            : "✓ Gjennomført manuelt"
+          : "Planlagt"}{" "}
+        ·{" "}
+        {w.garminRevision
+          ? w.garminRevision === w.revision
+            ? "Sendt til Garmin"
+            : "Endret etter sending"
+          : "Ikke sendt til Garmin"}
       </span>
     </button>
   );
@@ -699,7 +713,7 @@ function App() {
               {metric(
                 "Gjennomført",
                 (completed / 3600).toFixed(1).replace(".", ",") + " t",
-                "Observert · manuelt registrert",
+                "Importert eller manuelt registrert · koblede økter",
               )}
               {metric(
                 "Økter denne uken",
@@ -1046,6 +1060,7 @@ function App() {
         )}
         {page === "analysis" && (
           <>
+            <ImportedActivities />
             <div className="metrics">
               {metric(
                 "Planlagt denne uken",
@@ -1053,7 +1068,7 @@ function App() {
                 "Kjente planlagte varigheter",
               )}
               {metric(
-                "Manuelt gjennomført",
+                "Gjennomført",
                 time(completed),
                 "Registrert faktisk varighet",
               )}
@@ -1066,7 +1081,7 @@ function App() {
             <section className="panel">
               <h2>Treningsuken</h2>
               <p className="muted">
-                Minutter · planlagt og manuelt gjennomført
+                Minutter · planlagt og gjennomført i koblede økter
               </p>
               <Suspense fallback={<p>Laster diagram…</p>}>
                 <WeeklyChart workouts={all} />
@@ -1270,17 +1285,7 @@ function App() {
                 </Button>
               )}
             </section>
-            <section className="panel">
-              <h2>Integrasjoner</h2>
-              <div className="section-title">
-                <strong>AthleData</strong>
-                <span className="tag">Ikke tilkoblet</span>
-              </div>
-              <p className="muted">
-                Garmin- og restitusjonsdata blir tilgjengelige i neste
-                integrasjonsfase.
-              </p>
-            </section>
+            <IntegrationPanel />
             <section className="panel">
               <h2>Kalender uten nett</h2>
               <p className="muted">
@@ -1351,6 +1356,7 @@ function App() {
       )}
       {selected && (
         <Modal title={selected.title} onClose={() => setSelected(null)}>
+          <GarminActions workout={selected} />
           <span className="eyebrow">
             {sports[selected.sport]} · {selected.calendarDate}
           </span>
@@ -1365,7 +1371,9 @@ function App() {
               "Gjennomført",
               time(selected.completedSeconds),
               selected.completedAt
-                ? "Manuelt registrert"
+                ? selected.completionSource === "imported"
+                  ? "Importert aktivitet"
+                  : "Manuelt registrert"
                 : "Ingen registrering",
             )}
           </div>
@@ -1498,7 +1506,7 @@ function App() {
               <Check size={16} /> Marker gjennomført
             </Button>
           </form>
-          {selected.completedAt && (
+          {selected.manualCompletedSeconds != null && (
             <Button
               variant="ghost"
               disabled={offline}
@@ -1513,7 +1521,7 @@ function App() {
                 )
               }
             >
-              Fjern registrering
+              Fjern manuell registrering
             </Button>
           )}
           <Button

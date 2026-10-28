@@ -2,6 +2,8 @@
 
 This subsystem depends on verified AthleData capabilities, not direct Garmin passwords or unofficial scraping. See [ATHLEDATA_INTEGRATION.md](ATHLEDATA_INTEGRATION.md). All tool names below describe internal intentions until discovery confirms actual provider schemas.
 
+Current implementation (2026-10-28): `worker/integrations` and migration `0003` implement a bounded subset of this design: leased durable create/update/delete, ID replacement history, schema gates, ambiguous-write blocking, one-page summary import, stable-ID deduplication, direct-ID/manual matching and duration comparison. Tests use mocked provider results and real local D1. Automated read-back/reconciliation, verified live translation, lap/target analysis and a physical Garmin roundtrip remain release gates. See [PRODUCTION_SETUP.md](PRODUCTION_SETUP.md); the state machine below is the fuller target, not a list of states already implemented.
+
 ## Authority and identity
 
 ENDURANCE OS owns plans created here; provider activities are separate observations. A local workout UUID never changes. Each edit creates an immutable revision. Imported arbitrary Garmin workouts are read-only external references unless provider ownership/editing support is verified.

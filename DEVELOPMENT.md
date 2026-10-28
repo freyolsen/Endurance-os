@@ -1,5 +1,55 @@
 # Development status
 
+## Current continuation — production foundation and provider roundtrip, 2026-10-28
+
+Implemented against the existing React/Vite/Worker/D1 application; no frontend rebuild or database replacement. **Not production-ready and no live Garmin success claimed.** The release checklist and exact external actions are in [PRODUCTION_SETUP.md](PRODUCTION_SETUP.md).
+
+### Changes
+
+- Added `worker/integrations/{base,oauth,mcp,sync,activities,routes}.ts`: RFC metadata discovery, standalone authorization code + S256 PKCE, session-bound/single-use expiring state, AES-256-GCM credential storage, serialized/versioned refresh, disconnect/revocation attempt, and official `@modelcontextprotocol/client` v2 with Cloudflare-compatible schema validation. Secrets never enter the browser. Client registration remains external/pre-registered; no connector credentials are assumed.
+- Added additive migration `0003_integrations.sql`: connection/OAuth/lease tables, durable operation/result/history records, external workout ID generations, imported activity summaries/revisions/source IDs, links to immutable plans and import cursors. Local migrations preserve original data and are re-runnable through the migration ledger.
+- Garmin candidate create/update/delete adapters retain returned IDs, update with the current mapped ID and preserve replacement lineage. Saved revision and request key are durable before dispatch; stale mappings/schema changes block writes, and uncertain dispatched writes are never blindly replayed. Known result IDs survive separately from final mapping commit. Cron recovers interrupted operations and processes at most one owner-queued write.
+- Added manual one-page activity import (bounded to 100 summaries), stable-ID deduplication, direct historical-ID matching and owner-approved date/sport/duration candidates. Comparison uses the linked immutable revision. Imported unknown measurements remain unknown. The existing calendar/dashboard now distinguish linked imported completions from manual records without double counting; unmatched activities remain in Analyse.
+- Extended existing settings/workout/analysis components with connection controls, diagnostics, Garmin actions and imported activity comparison. All private routes remain behind Access/session/CSRF. Added bounded JSON input and retained existing workout/template/profile behavior.
+- Added `production:check`, `build:production`, `test:pwa`; improved static-shell precache and refusal to cache Access login redirects. Default/local and named production D1 remain separate; alternate public hostnames are disabled. No deploy/remote migration in automated scripts.
+- Updated README, integration/sync implementation notes, agent guidance and production setup runbook. Added ignores for local `.env*` files as well as existing `.dev.vars*` rules.
+
+### Executed verification
+
+| Check | Actual result |
+| --- | --- |
+| `npm run verify` | Passed: TypeScript, ESLint, 23 Vitest tests across four files, and build. |
+| D1/API tests | Real isolated workerd-backed D1, all three migrations, original CRUD/idempotency/auth tests retained; imported calendar completion, provenance and unknown-duration behavior added. Foreign-key check passes. |
+| OAuth/MCP tests | Synthetic HTTP responses only: S256 vector, encryption/AAD, metadata, callback session/state replay, refresh uncertainty, revocation, real SDK initialize/list/call against mocked transport. |
+| Garmin tests | Mock create → edit revision → update using original ID → store replacement ID → delete using replacement; persistent idempotency, ambiguous response protection, stale-ID dispatch block, schema gates, repeat import deduplication and immutable-revision comparison. |
+| Access validation | Signed RS256/JWKS fixtures verify signature, issuer, audience, owner, expiry; private integration mutations also reject missing/invalid CSRF. No deployed Access policy test. |
+| `npm run test:e2e` | Chromium login, create, reload persistence, opted-in offline calendar, disabled offline creation, manual completion, 390px overflow and deletion passed; no browser errors. Synthetic smoke workout soft-deleted afterward. |
+| `npm run build:production` | Passed; generated config checked for Access mode, production binding, disabled alternate hosts and 15-minute Cron. Browser initial JS ~149 KB gzip; Worker ~223 KB gzip. |
+| `wrangler deploy --dry-run --config dist/endurance_os/wrangler.json` | Passed packaging/assets/binding validation and exited without upload/deployment. Still uses intentional production placeholders; does not prove account access. |
+| `npm run test:pwa` | Passed using built assets: shell installation, hashed asset precache, offline cold reload and absence of API cache entries. Chromium only, not Safari evidence. |
+| `npm run db:migrate:local` | Migration 0003 applied successfully; final reapplication reports no migrations pending. No remote migration attempted. |
+| `npm run production:check` | Intentionally BLOCKED: production D1 UUID, real `APP_ORIGIN`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `OWNER_ACCESS_SUB` missing/placeholders. |
+| Wrangler account | `whoami`: not authenticated. No cloud resources or public/private deployment created. |
+| Credential scan | Known-key/private-key/literal-token pattern scan of tracked/new files and all existing Git history found no real credentials. One test-only long literal was reviewed and confirmed explicitly synthetic. This is not an exhaustive secret-format guarantee. |
+
+### Remaining external gates and limitations
+
+1. The environment's outbound proxy still denies `mcp.athletedata.health` with CONNECT 403 before provider TLS/HTTP. Actual issuer, client registration, scopes, MCP schemas and device semantics could not be discovered. Allow the resource host, then review/allow only actual discovered issuer origins.
+2. Owner/provider must register an independent OAuth client and supply verified account namespace/scopes; configure server-side encryption/client secrets securely, then complete consent from the authenticated app. Exact callback and setting names are in PRODUCTION_SETUP.md. Do not paste secrets into Git or chat.
+3. Review actual schema/units and implement any provider-specific structured-workout conversion the schema requires before enabling `ATHLEDATA_CONTRACTS_JSON`. The implemented field mapper plus mocked schemas is not proof of a real Garmin serializer. Schemas are pinned and checked before dispatch. Automatic dynamic registration and automated provider identity checking are not implemented.
+4. Complete authorized private Cloudflare setup, backup/inspect/migrate the actual production D1 and verify deployed Access/session behavior. Do not deploy without explicit authorization. Static configuration/build checks do not complete this gate.
+5. Complete explicitly authorized create/edit/update/watch-arrival/activity-import/delete roundtrip with owner confirmation on Fenix 6. No authenticated AthleData request or real Garmin write has happened here.
+6. Ambiguous operations deliberately block writes pending evidence-based reconciliation. Automated read-back/reconciliation UI, automatic backfill, interval/FIT detail/target compliance, recovery data and full import coverage remain unimplemented pending verified contracts. The current planned/actual analysis compares summary duration; dashboard totals cover linked calendar workouts.
+7. Physical iPhone Safari/standalone OAuth, VoiceOver, app installation/update and expired-Access/offline behavior remain untested.
+
+GitHub origin is `https://github.com/freyolsen/Endurance-os.git`. Existing local foundation commit was `d598b75`. Remote inspection and non-mutating push dry-run verified access before publication; no force push is intended. See Git history/remote for the resulting continuation commit. No PR or deployment is created by this handoff.
+
+Next task: unblock provider discovery and complete the smallest authorized real Garmin roundtrip; do not add UI breadth before these gates. Read PRODUCTION_SETUP.md first.
+
+---
+
+The following sections are **historical snapshots from earlier tasks**, retained for context. Their counts and architecture-only statements are superseded by the current status above.
+
 ## Implementation update — 2026-10-28
 
 The subsequent user request authorized foundation and training-calendar implementation. The earlier architecture-only status below is retained as history.

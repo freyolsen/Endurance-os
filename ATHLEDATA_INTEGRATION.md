@@ -1,6 +1,6 @@
 # AthleData: evidence, OAuth and MCP contract
 
-Status as of 2026-10-28: architecture only. Production provider behavior remains unverified. No user account was connected, no OAuth client registered, no tools invoked, and no workout sent.
+Implementation update, 2026-10-28: backend discovery, standalone authorization code/S256 flow, encrypted token storage, refresh/disconnect, official MCP SDK and schema-pinned capability gates are implemented and fixture-tested. The evidence ledger below records the original research; live provider findings remain unchanged. No real user account was connected, OAuth client registered, provider tool invoked or workout sent. The outbound proxy still blocks discovery. See [PRODUCTION_SETUP.md](PRODUCTION_SETUP.md) for the implemented subset, limitations and exact external setup actions. The remainder of this document is the target design, not a claim all its mechanisms are implemented.
 
 ## Evidence ledger
 

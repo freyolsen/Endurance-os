@@ -12,9 +12,14 @@
     "db:migrate:local": "node scripts/run.mjs wrangler d1 migrations apply endurance-os --local",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build",
     "test:integration": "node scripts/run.mjs vitest run tests/api.test.ts",
-    "test:e2e": "node scripts/browser-test.mjs"
+    "test:e2e": "node scripts/browser-test.mjs",
+    "test:pwa": "node scripts/pwa-test.mjs",
+    "production:check": "node scripts/production-check.mjs",
+    "build:production": "tsc --noEmit && CLOUDFLARE_ENV=production node scripts/run.mjs vite build"
   },
   "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/client": "^2.4.0",
     "@radix-ui/react-dialog": "^1.3.1",
     "@tanstack/react-query": "^5.105.0",
     "class-variance-authority": "^0.7.1",

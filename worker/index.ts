@@ -1,5 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
+import { integrationRoutes } from "./integrations/routes";
+import type { IntegrationEnv } from "./integrations/base";
+import { recoverExpired, processWrite } from "./integrations/sync";
 import {
   inputSchema,
   definitionSchema,
@@ -9,7 +12,7 @@ import {
   duration,
   type Step,
 } from "../shared/domain";
-export interface Env {
+export interface Env extends IntegrationEnv {
   DB: D1Database;
   AUTH_MODE: string;
   APP_ORIGIN: string;
@@ -148,7 +151,12 @@ async function handle(r: Request, e: Env) {
     (/^\/workouts\/[^/]+\/(move|duplicate|complete)$/.test(p) &&
       method === "POST") ||
     (/^\/workouts\/[^/]+\/lock$/.test(p) && method === "PATCH");
-  if (!allowed) fail(405, "METHOD_NOT_ALLOWED", "Handlingen er ikke støttet.");
+  if (
+    !allowed &&
+    !/^\/(integrations|sync|activities)(\/|$)/.test(p) &&
+    !/^\/workouts\/[^/]+\/garmin$/.test(p)
+  )
+    fail(405, "METHOD_NOT_ALLOWED", "Handlingen er ikke støttet.");
   const sub = await identity(r, e),
     now = Date.now();
   if (p === "/auth/session" && method === "POST") {
@@ -229,8 +237,8 @@ async function handle(r: Request, e: Env) {
       return json({ csrf, local: local(r, e) });
     }
   }
-  if (p === "/integrations")
-    return json([{ provider: "AthleData", status: "disconnected" }]);
+  const integration = await integrationRoutes(r, e, s.id);
+  if (integration) return integration;
   if (method === "GET") {
     if (p === "/profile" || p === "/preferences") {
       const row = await e.DB.prepare(
@@ -274,7 +282,7 @@ async function handle(r: Request, e: Env) {
         to = dateSchema.parse(url.searchParams.get("to") || "2100-01-01");
       const id = p.startsWith("/workouts/") ? p.split("/")[2] : null;
       const rows = await e.DB.prepare(
-        "SELECT w.*,r.snapshot_json,c.actual_duration_s,c.recorded_at FROM workouts w JOIN workout_revisions r ON r.workout_id=w.id AND r.revision=w.current_revision LEFT JOIN manual_completions c ON c.workout_id=w.id WHERE w.user_id='owner' AND w.deleted_at IS NULL AND w.calendar_date BETWEEN ? AND ? AND (? IS NULL OR w.id=?) ORDER BY w.calendar_date,w.created_at",
+        "SELECT w.*,r.snapshot_json,c.actual_duration_s,c.recorded_at,a.id imported_activity_id,a.elapsed_s,a.start_at,g.planned_revision garmin_revision FROM workouts w JOIN workout_revisions r ON r.workout_id=w.id AND r.revision=w.current_revision LEFT JOIN manual_completions c ON c.workout_id=w.id LEFT JOIN workout_activity_links l ON l.workout_id=w.id AND l.unlinked_at IS NULL LEFT JOIN completed_activities a ON a.id=l.activity_id LEFT JOIN external_workout_refs g ON g.workout_id=w.id AND g.state='active' WHERE w.user_id='owner' AND w.deleted_at IS NULL AND w.calendar_date BETWEEN ? AND ? AND (? IS NULL OR w.id=?) ORDER BY w.calendar_date,w.created_at",
       )
         .bind(from, to, id, id)
         .all<any>();
@@ -285,10 +293,22 @@ async function handle(r: Request, e: Env) {
         version: x.version,
         revision: x.current_revision,
         locked: !!x.locked,
-        completedSeconds: x.actual_duration_s,
-        completedAt: x.recorded_at
-          ? new Date(x.recorded_at).toISOString()
-          : null,
+        // An imported observation takes precedence, even when its duration is
+        // unknown. Never label a manually entered duration as device-observed.
+        completedSeconds: x.imported_activity_id
+          ? x.elapsed_s
+          : x.actual_duration_s,
+        completionSource: x.imported_activity_id
+          ? "imported"
+          : x.recorded_at
+            ? "manual"
+            : null,
+        manualCompletedSeconds: x.actual_duration_s,
+        garminRevision: x.garmin_revision,
+        completedAt:
+          (x.start_at ?? x.recorded_at) != null
+            ? new Date(x.start_at ?? x.recorded_at).toISOString()
+            : null,
       }));
       if (id && !data.length) fail(404, "NOT_FOUND", "Økten finnes ikke.");
       if (p === "/analytics/summary")
@@ -556,6 +576,13 @@ async function handle(r: Request, e: Env) {
   return json(result);
 }
 export default {
+  async scheduled(_controller: ScheduledController, e: Env) {
+    await recoverExpired(e);
+    const next = await e.DB.prepare(
+      "SELECT id FROM sync_operations WHERE state='queued' ORDER BY created_at LIMIT 1",
+    ).first<{ id: string }>();
+    if (next) await processWrite(e, next.id);
+  },
   async fetch(r: Request, e: Env) {
     try {
       return await handle(r, e);
